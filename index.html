@@ -435,7 +435,7 @@ function drawPanel(buf, st) {
   fillRect(buf, P + 11, 69, 20, 10, 0);    // 经
   fillRect(buf, P + 2, 89, 29, 6, 0);      // 钥匙数量
   const right = (n, y, pad = 1) => { const wd = numWidth(n); drawNumber(buf, n, P + 31 - pad - wd, y, 1); };
-  drawNumber(buf, st.floor, P + 12, 2, 1);
+  drawNumber(buf, st.floor - 1, P + 12, 2, 1);   // 原版楼层编号从 0 开始 (实测首屏为 第0层)
   drawNumber(buf, st.level, P + 10, 12, 1);
   right(st.hp, 24);
   right(st.atk, 36);
@@ -649,6 +649,7 @@ function render(buf, st, map, W, H, isMonster, monIndex, view, dlg, cfm) {
       const msg = ref([]);
       // 原版对话框当前正文 (画在 159x96 画布上, 按键推进)
       const dlg = ref('仙女：我是这里的仙子，刚才你被这里的小怪打晕了。');
+      const dlgRest = ref([]);   // 后续分页 (原版对话框每页 8 字 x 3 行, 按键翻页)
       // 原版 是(Y)/否(N) 确认框
       const cfm = ref(null);
       const panel = ref(null);
@@ -658,7 +659,19 @@ function render(buf, st, map, W, H, isMonster, monIndex, view, dlg, cfm) {
       const canvas = ref(null);
       let ctx = null;
 
-      const say = (t) => { msg.value.unshift(t); if (msg.value.length > 80) msg.value.pop(); dlg.value = t; };
+      const say = (t) => { msg.value.unshift(t); if (msg.value.length > 80) msg.value.pop(); dlg.value = t; dlgRest.value = []; };
+      // 原版对话框分页: 每页 3 行、每行 8 个汉字 (与实测原版一致), 长文按键翻页
+      const sayPages = (t) => {
+        const pages = []; let cur = '';
+        for (const ch of String(t)) {
+          if (ch === '\n') { pages.push(cur); cur = ''; continue; }
+          if (cjkWidth(cur + ch) > 128) { pages.push(cur); cur = ''; }
+          cur += ch;
+        }
+        if (cur || !pages.length) pages.push(cur);
+        msg.value.unshift(pages.join(' ')); if (msg.value.length > 80) msg.value.pop();
+        dlg.value = pages[0]; dlgRest.value = pages.slice(1);
+      };
       const load = (f) => { map.value = D.floors[f].slice(); };
       const at = (x, y) => (x < 0 || x >= W || y < 0 || y >= H) ? T.VOID : map.value[y * W + x];
       const setAt = (x, y, v) => { if (x >= 0 && x < W && y >= 0 && y < H) map.value[y * W + x] = v; };
@@ -709,10 +722,10 @@ function render(buf, st, map, W, H, isMonster, monIndex, view, dlg, cfm) {
         checkLevel();
         if (m.name === '魔塔守护者' && !S.bossDown) {
           S.bossDown = true;
-          panel.value = { type: 'talk', title: '冥灵魔王', text: D.texts.boss + '\n' + D.texts.rescue + '\n' + D.texts.princess };
-          say('塔的魔法开始瓦解，必须在 90 秒内走出魔塔！');
+          // 原版剧情走对话框分页
+          sayPages('冥灵魔王：' + D.texts.boss + D.texts.rescue + D.texts.princess + '勇士：塔的魔法开始瓦解，必须在 90 秒内走出魔塔！');
         }
-        if (S.hp <= 0) { S.hp = 0; S.ended = 'lose'; panel.value = { type: 'over', title: '你倒下了', text: '勇士的生命耗尽了……' }; }
+        if (S.hp <= 0) { S.hp = 0; S.ended = 'lose'; sayPages('你倒下了。勇士的生命耗尽了……'); panel.value = { type: 'over', title: '你倒下了', text: '勇士的生命耗尽了……' }; }
       }
       function checkLevel() {
         // 重要: 等级用"累计总经验"判定, 不再消耗可支配经验 —— 可支配经验是玩家的资源,
@@ -727,7 +740,11 @@ function render(buf, st, map, W, H, isMonster, monIndex, view, dlg, cfm) {
       }
 
       function move(dx, dy) {
-      if (dlg.value) { dlg.value = null; return; }   // 原版行为: 有对白时先按键推进
+      if (dlg.value) {                              // 原版行为: 有对白时先按键翻页/推进
+        if (dlgRest.value.length) { dlg.value = dlgRest.value.shift(); draw(); }
+        else { dlg.value = null; draw(); }
+        return;
+      }
         if (panel.value || S.ended) return;
         const nx = S.x + dx, ny = S.y + dy, v = at(nx, ny);
         if (v === T.DOOR1 || v === T.DOOR2 || v === T.DOOR3) {
@@ -754,9 +771,10 @@ function render(buf, st, map, W, H, isMonster, monIndex, view, dlg, cfm) {
         else if (v === T.UPGRADE) panel.value = { type: 'upgrade' };
         else if (v === T.FAIRY) panel.value = { type: 'fairy' };
         else if (v === T.NPC || v === 1 || v === 2) {
-          if (S.floor >= 24) panel.value = { type: 'talk', title: '公主', text: D.texts.rescue + '\n' + D.texts.princess };
-          else if (S.floor === 4) panel.value = { type: 'talk', title: '杰克', text: D.texts.jack };
-          else panel.value = { type: 'talk', title: '村民', text: '这座塔共有 24 层。\n' + D.texts.help };
+          // 原版 NPC 对话就是对话框里的分页文字, 不是网页弹窗
+          if (S.floor >= 24) { S.ended = S.bossDown ? 'win' : S.ended; sayPages('公主：' + D.texts.rescue + D.texts.princess); }
+          else if (S.floor === 4) sayPages('杰克：' + D.texts.jack);
+          else sayPages('村民：这座塔共有 24 层。' + D.texts.help);
         }
         draw();
       }
@@ -818,6 +836,12 @@ function render(buf, st, map, W, H, isMonster, monIndex, view, dlg, cfm) {
         e.preventDefault(); return;
       }
         if (panel.value) { if (e.key === 'Enter' || e.key === 'Escape' || e.key === ' ') { panel.value = null; draw(); e.preventDefault(); } return; }
+        // 原版行为: 对话框停留时按键翻页/推进 (M/H 是重制版附加功能, 放行)
+        if (dlg.value && !(e.key === 'm' || e.key === 'M' || e.key === 'h' || e.key === 'H')) {
+          if (dlgRest.value.length) dlg.value = dlgRest.value.shift();
+          else dlg.value = null;
+          draw(); e.preventDefault(); return;
+        }
         // 原版行为: 地图上按退出键 → 弹出 是(Y)/否(N) 确认框
         if (e.key === 'Escape') {
           cfm.value = { title: '确定退出', sel: 1, onYes: () => { Object.assign(S, newState()); msg.value = []; panel.value = null; load(1); say(D.texts.intro); draw(); } };
