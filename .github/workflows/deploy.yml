@@ -24,10 +24,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Enable and configure Pages
+      - name: Configure Pages
         uses: actions/configure-pages@v5
-        with:
-          enablement: true
+        # 不带 enablement:站点已在网页端手动启用(Source=GitHub Actions),
+        # 工作流 GITHUB_TOKEN 没有创建站点所需的 administration 权限,只有部署权限。
 
       - name: Upload site artifact
         uses: actions/upload-pages-artifact@v3
