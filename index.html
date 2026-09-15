@@ -511,7 +511,8 @@ function render(buf, st, map, W, H, isMonster, monIndex, view, dlg) {
   clearScreen(buf, 0);
   // 地图视口: 以英雄为中心滚动
   const ox = Math.max(0, Math.min(W - VIEW_COLS, st.x - Math.floor(VIEW_COLS / 2)));
-  const oy = Math.max(0, Math.min(H - VIEW_ROWS, st.y - Math.floor(VIEW_ROWS / 2)));
+  // 战斗中把勇士放到对话框下方 (与原版战斗画面一致: 精灵重叠在框的下方)
+  const oy = Math.max(0, Math.min(H - VIEW_ROWS, st.y - Math.floor(VIEW_ROWS / 2) + (st.fight ? 4 : 0)));
   view.ox = ox; view.oy = oy;
   const isFloor1 = st.floor === 1 && typeof SCREEN1_BG !== 'undefined' && SCREEN1_BG;
   if (isFloor1) {
@@ -546,6 +547,8 @@ function render(buf, st, map, W, H, isMonster, monIndex, view, dlg) {
   }
   // 勇士 (16x16, 脚踩在当前格)
   const hx = (st.x - ox) * CELL, hy = (st.y - oy) * CELL;   // 原版勇士精灵以左上角对齐格子
+  // 原版战斗表现: 怪物精灵与勇士精灵重叠在同一格
+  if (st.fight && st.fightIdx >= 0) blit(buf, MON16[st.fightIdx % MON16.length], hx, hy, 1);
   blit(buf, SPRITES.hero, hx, hy, 1);
   // 状态栏
   drawPanel(buf, st);
@@ -586,7 +589,7 @@ function render(buf, st, map, W, H, isMonster, monIndex, view, dlg) {
       floor: 1, x: (D.meta && D.meta.start ? D.meta.start.x : 5), y: (D.meta && D.meta.start ? D.meta.start.y : 10),
       hp: 1000, hpMax: 1000, atk: 10, def: 10, gold: 0, exp: 0, expTotal: 0, level: 1,
       keys: [0, 0, 0], cross: 0,
-      visited: {}, killed: {}, log: [],
+      visited: {}, killed: {}, log: [], fight: null, fightIdx: -1,
       bossDown: false, ended: null
     };
   }
@@ -641,7 +644,17 @@ function render(buf, st, map, W, H, isMonster, monIndex, view, dlg) {
         S.hp -= r.hurt; S.gold += gotG; S.exp += gotE; S.expTotal += gotE;
         S.killed[m.name] = (S.killed[m.name] || 0) + 1;
         setAt(x, y, T.FLOOR);
+        // 原版战斗表现: 勇士与怪物精灵重叠, 对话框先显示 "勇士：······" 动画, 再出结果
+        S.fight = m.name;
+        S.fightIdx = monIndex(v);
+        dlg.value = '勇士：······';
         say('击败 ' + m.name + '：损失 ' + r.hurt + ' 生命，得到 ' + gotG + ' 金币 / ' + gotE + ' 经验');
+        setTimeout(() => {
+          S.fight = null;
+          S.fightIdx = -1;
+          dlg.value = '勇士：战斗胜利！损失 ' + r.hurt + ' 生命，得到 ' + gotG + ' 金币、' + gotE + ' 经验';
+          draw();
+        }, 700);
         checkLevel();
         if (m.name === '魔塔守护者' && !S.bossDown) {
           S.bossDown = true;
@@ -793,7 +806,7 @@ function render(buf, st, map, W, H, isMonster, monIndex, view, dlg) {
         draw(); refreshSlots();
         window.addEventListener('keydown', onKey);
         // 调试/自动化测试句柄 (只读游戏状态与移动入口, 不影响玩法)
-        window.__MOTA__ = { S, map, msg, move, tileAt: at, walkable, getPanel: () => panel.value, draw, changeFloor, isMonster, monIndex, battle };
+        window.__MOTA__ = { S, map, msg, dlg, canvas, VIEW, move, tileAt: at, walkable, getPanel: () => panel.value, draw, changeFloor, isMonster, monIndex, battle };
       });
 
       const hpPct = computed(() => Math.max(0, Math.min(100, S.hp / Math.max(1, S.hpMax) * 100)));
