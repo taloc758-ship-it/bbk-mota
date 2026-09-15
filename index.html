@@ -434,19 +434,23 @@ function drawPanel(buf, st) {
   fillRect(buf, P + 10, 45, 21, 11, 0);    // 防
   fillRect(buf, P + 11, 57, 20, 10, 0);    // 金
   fillRect(buf, P + 11, 69, 20, 10, 0);    // 经
-  fillRect(buf, P + 2, 89, 29, 6, 0);      // 钥匙数量
-  const right = (n, y, pad = 1) => { const wd = numWidth(n); drawNumber(buf, n, P + 31 - pad - wd, y, 1); };
+  // 钥匙数量区: 只擦三段数字格, 保留原版 x=128/138/148 的分隔竖线
+  fillRect(buf, P + 3, 89, 7, 6, 0);
+  fillRect(buf, P + 13, 89, 7, 6, 0);
+  fillRect(buf, P + 23, 89, 7, 6, 0);
+  // 原版实测: 各字段数值右端并不统一 —— 命→x155, 攻/防→x151, 金/经→x149
   drawNumber(buf, st.floor - 1, P + 12, 2, 1);   // 原版楼层编号从 0 开始 (实测首屏为 第0层)
   drawNumber(buf, st.level, P + 10, 12, 1);
-  right(st.hp, 24);
-  right(st.atk, 36);
-  right(st.def, 48);
-  right(st.gold, 59);
-  right(st.exp, 71);
-  // 三把钥匙数量 (竖线分隔在 x=P+10 / P+20)
-  drawNumber(buf, st.keys[0], P + 7, 90, 1);
-  drawNumber(buf, st.keys[1], P + 17, 90, 1);
-  drawNumber(buf, st.keys[2], P + 27, 90, 1);
+  const rightAt = (n, endX, y) => { const wd = numWidth(n); drawNumber(buf, n, endX - wd, y, 1); };
+  rightAt(st.hp, P + 28, 24);
+  rightAt(st.atk, P + 24, 36);
+  rightAt(st.def, P + 24, 48);
+  rightAt(st.gold, P + 22, 59);
+  rightAt(st.exp, P + 22, 71);
+  // 三把钥匙数量: 原版实测图标 x=132/142/152 (等距 10, 分隔竖线在 128/138/148)
+  drawNumber(buf, st.keys[0], P + 4, 90, 1);
+  drawNumber(buf, st.keys[1], P + 14, 90, 1);
+  drawNumber(buf, st.keys[2], P + 24, 90, 1);
 }
 
 // ---- 原版 GB2312 16x16 点阵字库 (从 8.BIN 抽出, 偏移 = ((hi-0xB0)*94+(lo-0xA1))*32) ----
