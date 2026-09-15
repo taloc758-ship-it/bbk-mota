@@ -54,6 +54,7 @@
       <button data-game="0" class="on">修改版</button>
       <button data-game="1">原版</button>
     </span>
+    <button id="hapticBtn">震动</button>
     <button id="slotBtn">槽位1</button>
     <button id="saveBtn">存档</button>
     <button id="loadBtn">读档</button>
@@ -200,6 +201,20 @@ window.addEventListener("blur", function () {
   sendKeyUp();
 });
 
+// 触感反馈:按下游戏键时短震动一下(安卓支持;iOS Safari 无网页震动 API,自动跳过)
+var haptic = true;
+try { haptic = localStorage.getItem("bbk_haptic") !== "0"; } catch (err) {}
+var hapticBtn = document.getElementById("hapticBtn");
+function buzz(ms) { if (haptic && navigator.vibrate) { try { navigator.vibrate(ms); } catch (err) {} } }
+function updateHapticBtn() { hapticBtn.classList.toggle("on", haptic); }
+hapticBtn.addEventListener("click", function () {
+  haptic = !haptic;
+  try { localStorage.setItem("bbk_haptic", haptic ? "1" : "0"); } catch (err) {}
+  updateHapticBtn();
+  buzz(40);
+});
+updateHapticBtn();
+
 // touch buttons
 document.querySelectorAll("[data-code]").forEach(function (btn) {
   var code = parseInt(btn.getAttribute("data-code"), 16);
@@ -207,6 +222,7 @@ document.querySelectorAll("[data-code]").forEach(function (btn) {
   var down = function (ev) {
     ev.preventDefault();
     btn.setPointerCapture && btn.setPointerCapture(ev.pointerId);
+    buzz(18);
     sendKeyDown(code);
     timer = setInterval(function () { sendKeyDown(code); }, 230);
   };
