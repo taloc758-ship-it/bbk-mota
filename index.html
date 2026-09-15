@@ -54,8 +54,12 @@
       <button data-game="0" class="on">修改版</button>
       <button data-game="1">原版</button>
     </span>
+    <button id="slotBtn">槽位1</button>
+    <button id="saveBtn">存档</button>
+    <button id="loadBtn">读档</button>
     <button id="resetBtn">重开</button>
     <span id="drop">拖入/选择其他 .gam</span>
+    <span id="slInfo" style="font-size:12px;color:#8b929c;align-self:center;"></span>
   </div>
 
   <div class="pad">
@@ -113,7 +117,10 @@ var THEMES = {
   yellow: { bg:0xF72C, fg:0x2920 }
 };
 function rgb565(c) {
-  return [ ((c>>11)&31)*255/31|0, ((c>>6)&63)*255/63|0, (c&31)*255/31|0 ];
+  // RGB565: R=bit15..11(5位) G=bit10..5(6位) B=bit4..0(5位)
+  // 注意 G 必须是 >>5：之前写成 >>6 会把 G 通道取偏一位，
+  // 灰色 0xD6DA 会渲染成 (214,109,214) 的粉色。
+  return [ ((c>>11)&31)*255/31|0, ((c>>5)&63)*255/63|0, (c&31)*255/31|0 ];
 }
 
 var e, emu, W, H, lcdBytes, lastHash = -1;
@@ -244,6 +251,7 @@ function loadGameIdx(i) {
   lastHash = -1;
   if (!loadGameBytes(games[i].bytes)) { alert("加载游戏失败"); return false; }
   curGame = i;
+  if (drop.dataset) drop.dataset.custom = "";
   document.getElementById("drop").textContent = "当前：" + games[i].name;
   document.title = games[i].name + " · 步步高词典模拟器";
   markGameBtns(i);
@@ -272,7 +280,7 @@ drop.addEventListener("click", function () {
       lastHash = -1;
       var ok = loadGameBytes(new Uint8Array(fr.result));
       if (!ok) alert("这不是有效的 .gam 文件");
-      else { curGame = -1; markGameBtns(-1); drop.textContent = "当前：" + inp.files[0].name; document.title = inp.files[0].name + " · 步步高词典模拟器"; }
+      else { curGame = -1; markGameBtns(-1); drop.dataset.custom = inp.files[0].name; drop.textContent = "当前：" + inp.files[0].name; document.title = inp.files[0].name + " · 步步高词典模拟器"; }
     };
     fr.readAsArrayBuffer(inp.files[0]);
   };
@@ -289,9 +297,71 @@ window.addEventListener("drop", function (ev) {
     lastHash = -1;
     var ok = loadGameBytes(new Uint8Array(fr.result));
     if (!ok) alert("这不是有效的 .gam 文件");
-    else { curGame = -1; markGameBtns(-1); drop.textContent = "当前：" + f.name; document.title = f.name + " · 步步高词典模拟器"; }
+    else { curGame = -1; markGameBtns(-1); drop.dataset.custom = f.name; drop.textContent = "当前：" + f.name; document.title = f.name + " · 步步高词典模拟器"; }
   };
   fr.readAsArrayBuffer(f);
+});
+
+// ---- 即时存档/读档：3 个槽位，localStorage 持久化，按游戏分开 ----
+var SLOT_N = 3, slot = 1;
+var stateBufP = 0, STATE_CAP = 512 * 1024;
+var slInfo = document.getElementById("slInfo");
+var slotBtn = document.getElementById("slotBtn");
+function ensureBuf() { if (!stateBufP) stateBufP = e.bbkemu_alloc(STATE_CAP); return stateBufP; }
+function bytesToB64(u8) {
+  var s = "", CH = 0x8000;
+  for (var i = 0; i < u8.length; i += CH) s += String.fromCharCode.apply(null, u8.subarray(i, Math.min(i + CH, u8.length)));
+  return btoa(s);
+}
+function b64ToBytes(b64) {
+  var bin = atob(b64), u8 = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8;
+}
+function gameLabel() { return curGame >= 0 ? games[curGame].name : ((drop.dataset && drop.dataset.custom) || "自定义游戏"); }
+function slotKey(sfx) { var g = curGame >= 0 ? "g" + curGame : "gx"; return "bbk_" + sfx + "_" + g + "_s" + slot; }
+function slotInfoText(k) {
+  try {
+    var m = JSON.parse(localStorage.getItem(k) || "null");
+    if (!m) return "";
+    var d = new Date(m.t);
+    return (m.game || "?") + " " + d.getHours() + ":" + ("0" + d.getMinutes()).slice(-2);
+  } catch (err) { return ""; }
+}
+function showSlotInfo(prefix) {
+  var meta = slotInfoText(slotKey("meta"));
+  slInfo.textContent = prefix + (meta ? " · " + meta : "");
+}
+slotBtn.addEventListener("click", function () {
+  slot = slot % SLOT_N + 1;
+  slotBtn.textContent = "槽位" + slot;
+  showSlotInfo("槽位" + slot);
+});
+document.getElementById("saveBtn").addEventListener("click", function () {
+  var p = ensureBuf();
+  var len = e.bbkemu_save_state(emu, p, STATE_CAP);
+  if (!len) { slInfo.textContent = "存档失败"; return; }
+  try {
+    localStorage.setItem(slotKey("st"), bytesToB64(view().subarray(p, p + len)));
+    localStorage.setItem(slotKey("meta"), JSON.stringify({ game: gameLabel(), idx: curGame, t: Date.now() }));
+    showSlotInfo("已存档 → 槽位" + slot);
+  } catch (err) { slInfo.textContent = "存档失败(浏览器存储空间不足)"; }
+});
+document.getElementById("loadBtn").addEventListener("click", function () {
+  var b64;
+  try { b64 = localStorage.getItem(slotKey("st")); } catch (err) { b64 = null; }
+  if (!b64) { slInfo.textContent = "槽位" + slot + " 为空"; return; }
+  var bytes = b64ToBytes(b64);
+  var p = ensureBuf();
+  view().set(bytes, p);
+  if (e.bbkemu_load_state(emu, p, bytes.length) === 1) {
+    lastHash = -1;
+    try {
+      var m = JSON.parse(localStorage.getItem(slotKey("meta")) || "null");
+      if (m && m.idx >= 0 && m.idx < games.length && curGame !== m.idx) { curGame = m.idx; markGameBtns(curGame); }
+    } catch (err) {}
+    showSlotInfo("已读档 ← 槽位" + slot);
+  } else slInfo.textContent = "读档失败(数据不匹配)";
 });
 
 (async function init() {
