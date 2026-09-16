@@ -773,10 +773,13 @@ function render(buf, st, map, W, H, isMonster, monIndex, view, dlg, cfm, menu) {
       }
 
       function simulate(m) {
-        const dmg = Math.max(1, S.atk - m.def);
+        const raw = S.atk - m.def;
+        const canHurt = raw > 0;                                   // 原版拒战文案1: 能力太低(打不动)
+        const dmg = Math.max(1, raw);
         const turns = Math.ceil(m.hp / dmg);
         const hurt = (turns - 1) * Math.max(0, m.atk - S.def);
-        return { dmg, turns, hurt, win: hurt < S.hp };
+        const tooLowHp = canHurt && hurt >= S.hp;                  // 原版拒战文案2: 生命太低(会被打死)
+        return { dmg, turns, hurt, canHurt, tooLowHp, win: canHurt && !tooLowHp };
       }
       // 奖励倍率: 原版怪物表里最弱的怪只给 1 点经验/1 金币, 若照搬则玩家永远滚不起雪球
       // (全塔 384 只怪只够买几次 +17 攻击, 塔顶 BOSS 防御 1800 打不动)。重制版按层数放大收益。
@@ -785,8 +788,13 @@ function render(buf, st, map, W, H, isMonster, monIndex, view, dlg, cfm, menu) {
         const m = MON[monIndex(v)];
         if (!m) { setAt(x, y, T.FLOOR); return; }
         const r = simulate(m);
-        if (!r.win) {
-          say('怪物认为你能力太低：' + m.name + ' 会让你损失 ' + r.hurt + ' 生命（当前 ' + S.hp + '）');
+        if (!r.canHurt) {
+          say('怪物认为你能力太低，拒绝战斗。');
+          panel.value = { type: 'battle', mon: m, sim: r, canFight: false };
+          return;
+        }
+        if (r.tooLowHp) {
+          say('怪物认为你生命太低，拒绝战斗。');
           panel.value = { type: 'battle', mon: m, sim: r, canFight: false };
           return;
         }
@@ -865,15 +873,17 @@ function render(buf, st, map, W, H, isMonster, monIndex, view, dlg, cfm, menu) {
           panel.value = null;
         }
         else if (v === T.UPGRADE) {
+          // 原版仙女菜单 7 选项 (mota.gam 文案 0xAE4A): 经验为货币, 含等级购买
           menu.value = {
             title: '能力升级', sel: 0, top: 0, hint: '上下选择 回车确定',
             items: [
-              { label: '攻击 +5 需30经验', run: () => upExp(5, 0, 30) },
-              { label: '防御 +5 需30经验', run: () => upExp(0, 5, 30) },
-              { label: '生命 +800 需25金', run: () => upGold(800, 0, 0, 25) },
-              { label: '攻击 +4 需25金', run: () => upGold(0, 4, 0, 25) },
-              { label: '防御 +4 需25金', run: () => upGold(0, 0, 4, 25) },
-              { label: '离开', close: true },
+              { label: '提升一级 需100点', run: () => buyLevel(1, 100) },
+              { label: '增加攻击5 需30点', run: () => upExp(5, 0, 30) },
+              { label: '增加防御5 需30点', run: () => upExp(0, 5, 30) },
+              { label: '离  开', close: true },
+              { label: '提升三级 需270点', run: () => buyLevel(3, 270) },
+              { label: '增加攻击17 需95点', run: () => upExp(17, 0, 95) },
+              { label: '增加防御17 需95点', run: () => upExp(0, 17, 95) },
             ],
           };
           panel.value = null;
@@ -889,8 +899,13 @@ function render(buf, st, map, W, H, isMonster, monIndex, view, dlg, cfm, menu) {
           }
         }
         else if (v === T.NPC || v === 1 || v === 2) {
-          // 原版 NPC 对话就是对话框里的分页文字, 不是网页弹窗
-          if (S.floor >= 24) { S.ended = S.bossDown ? 'win' : S.ended; sayPages('公主：' + D.texts.rescue + D.texts.princess); }
+          // 原版 NPC 交易 (文案 0x1117E/0x11296): 神秘老人 500经验→星光神剑(攻+150); 商人 800金币→光芒神盾(防+190)
+          panel.value = null;
+          if (!S.oldmanSword && S.exp >= 500) {
+            cfm.value = { title: '神秘老人：用 500 经验换<星光神剑>攻+150？', sel: 0, onYes: () => { S.exp -= 500; S.oldmanSword = 1; S.atk += 150; say('获得<星光神剑>：攻击+150'); } };
+          } else if (!S.merchantShield && S.gold >= 800) {
+            cfm.value = { title: '商人：用 800 金币换<光芒神盾>防+190？', sel: 0, onYes: () => { S.gold -= 800; S.merchantShield = 1; S.def += 190; say('获得<光芒神盾>：防御+190'); } };
+          } else if (S.floor >= 24) { S.ended = S.bossDown ? 'win' : S.ended; sayPages('公主：' + D.texts.rescue + D.texts.princess); }
           else if (S.floor === 4) sayPages('杰克：' + D.texts.jack);
           else sayPages('村民：这座塔共有 24 层。' + D.texts.help);
         }
@@ -917,6 +932,14 @@ function render(buf, st, map, W, H, isMonster, monIndex, view, dlg, cfm, menu) {
       function buyKey(k, price) { if (S.gold < price) { say(D.texts.noGold); return; } S.gold -= price; S.keys[k]++; say('购买 ' + (k + 1) + '号钥匙（-$' + price + '）'); }
       function sellKey(k, price) { if (S.keys[k] < 1) { say(D.texts.noKey); return; } S.keys[k]--; S.gold += price; say('卖出 ' + (k + 1) + '号钥匙（+$' + price + '）'); }
       function upExp(datk, ddef, cost) { if (S.exp < cost) { say(D.texts.noExp + '（需 ' + cost + ' 点）'); return; } S.exp -= cost; S.atk += datk; S.def += ddef; say('能力提升：攻击+' + datk + ' 防御+' + ddef); }
+      // 原版仙女"提升一级/三级": 经验购买等级; 等级收益沿用本作等级机制 (生命+100 攻+2 防+2/级)
+      function buyLevel(n, cost) {
+        if (S.exp < cost) { say(D.texts.noExp + '（需 ' + cost + ' 点）'); return; }
+        S.exp -= cost; S.level += n;
+        const hp = 100 * n, a = 2 * n, d = 2 * n;
+        S.hpMax += hp; S.hp += hp; S.atk += a; S.def += d;
+        say('提升 ' + n + ' 级：生命+' + hp + ' 攻击+' + a + ' 防御+' + d);
+      }
       function upGold(hp, datk, ddef, cost) { if (S.gold < cost) { say(D.texts.noGold); return; } S.gold -= cost; S.hpMax += hp; S.hp += hp; S.atk += datk; S.def += ddef; say('能力提升：生命+' + hp + ' 攻击+' + datk + ' 防御+' + ddef); }
       function giveCross() { if (S.cross < 1) { say('你没有<幸运十字架>'); return; } S.cross--; S.atk += 30; S.def += 30; S.hpMax += 1000; S.hp += 1000; say('仙女恢复能力：攻击+30 防御+30 生命+1000'); }
 
